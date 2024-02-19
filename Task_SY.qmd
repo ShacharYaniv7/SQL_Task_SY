@@ -1,0 +1,163 @@
+---
+title: "Task_ShacharY"
+format: html
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+## Running Code
+
+When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+
+```{r}
+
+
+library(ggplot2)
+library(dplyr)
+library(dbplyr)
+library(RSQLite)
+library(odbc)
+```
+
+```{r}
+con_chocolate <- DBI::dbConnect(drv = RSQLite::SQLite(),
+dbname = "chocolate.sqlite")
+
+tables <- DBI::dbListTables(con_chocolate)
+# print(tables)
+
+customers <- DBI::dbReadTable(con_chocolate,"customers")
+# print(customers)
+
+orders <- DBI::dbReadTable(con_chocolate,"orders")
+# print(customers)
+
+products <- DBI::dbReadTable(con_chocolate,"products")
+# print(customers)
+
+salesreps <- DBI::dbReadTable(con_chocolate,"salesreps")
+# print(customers)
+```
+
+## Question 1
+
+The query of this code is to show the customer that made the biggest combined orders in 2023 (with names and addresses), and what is the total amount they paid.
+
+The query starts by combining 2 tables, the Orders and the Products, to calculate the payment for each order. then, we filter only the orders starting 2023, and the orders for each customer are combined. later, we add the Customers table for additional info like their names and sort the table in a decreasing order. At last, we filter only the first row, hence the biggest paying customer since the beginning of 2023.
+
+The answer is Beieler, Joshua (biggers customer). their total purchases are 1057.03. 
+
+```{sql, connection= con_chocolate, output.var = "q1"}
+
+WITH total_orders AS (
+  SELECT cid, SUM(Price * amount) AS sum_total
+  FROM `orders`
+  LEFT JOIN products USING (pid)
+  WHERE (sale_date > '2023-01-01')
+  GROUP BY cid
+)
+
+SELECT *
+FROM total_orders
+LEFT JOIN customers USING (cid)
+ORDER BY sum_total DESC
+LIMIT 1
+```
+
+```{r}
+print(q1)
+```
+
+## Question 2
+
+The best sales rep is: Pryor, Briana. They made 177 sales.
+
+Their top customer is al-Yousef, Fikri.
+
+Their most sold candy is Cookies 'n Cream.
+
+
+```{sql, connection= con_chocolate, output.var = "q2"}
+
+/* creating a table for each rep's total sales*/
+WITH sales_per_rep AS( 
+  SELECT srid, COUNT(srid) AS total_sales
+  FROM orders
+  GROUP BY srid
+),
+
+/* finding the average sales for reps on each recruitment year*/
+ avg_per_year AS(
+  SELECT year_joined, AVG(total_sales) AS avg
+  FROM sales_per_rep
+  JOIN salesreps USING (srid)
+  GROUP BY year_joined
+), 
+
+/* finding the gap between sales and yearly average for each rep*/
+  rated_reps AS(
+  SELECT srid, Name, year_joined, total_sales, avg, (total_sales - avg) AS sum_comp
+  FROM salesreps
+  JOIN sales_per_rep USING (srid)
+  JOIN avg_per_year USING (year_joined)
+  ORDER BY sum_comp DESC
+),
+
+/* sorting only the best rep*/
+best_rep AS(
+SELECT  srid, Name, total_sales
+FROM rated_reps
+LIMIT 1
+),
+
+/* calculating the orders */ 
+total_orders_per_rep AS (
+SELECT cid, name AS customer_name, srid, SUM(Price * amount) AS sum_total
+FROM orders
+JOIN products USING (pid)
+JOIN customers USING (cid)
+GROUP BY cid, srid
+),
+
+/*Sorting only the best reps orders, finding the biggest one*/
+top_customer AS(
+SELECT cid, customer_name, srid, sum_total
+FROM total_orders_per_rep
+RIGHT JOIN best_rep USING (srid)
+ORDER BY sum_total DESC
+LIMIT 1
+),
+
+/* finding amount of candy sold by each rep*/
+candy_amounts AS(
+SELECT srid, pid, SUM(amount) AS sum_amount, candy_names
+FROM orders
+JOIN products USING (pid)
+GROUP BY srid, pid
+),
+
+/*finding the best reps most sold candy*/
+top_candy AS(
+SELECT srid, pid, sum_amount, candy_names
+FROM candy_amounts
+RIGHT JOIN best_rep USING (srid)
+ORDER BY sum_amount DESC
+LIMIT 1
+),
+
+/*combining all the answers*/
+final_answer AS(
+SELECT srid, Name AS best_rep, total_sales, customer_name AS top_customer, candy_names AS top_candy
+FROM best_rep
+JOIN top_customer USING (srid)
+JOIN top_candy USING (srid)
+)
+
+/* showing results*/ 
+SELECT * FROM final_answer
+
+```
+
+
